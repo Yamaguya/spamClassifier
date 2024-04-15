@@ -1,8 +1,7 @@
 import os
 import re
 import matplotlib.pyplot as plt
-from sklearn.utils.fixes import signature
-from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tokenize import word_tokenize
 
 def getWordSpamProb(word): #returns the probability that a spam file will contain this word
     if word not in spamWordCount:
