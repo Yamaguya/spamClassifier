@@ -2,177 +2,148 @@ import os
 import re
 import matplotlib.pyplot as plt
 from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from collections import defaultdict
+import nltk
 
-def getWordSpamProb(word): #returns the probability that a spam file will contain this word
-    if word not in spamWordCount:
-        return 0
-    spamProb = spamWordCount[word]/len(spamList)
-    return spamProb
+nltk.download('stopwords')
+nltk.download('punkt')
 
-def getWordHamProb(word): #returns the probability that a ham file will contain this word
-    if word not in hamWordCount:
-        return 0
-    hamProb = hamWordCount[word]/len(hamList)
-    return hamProb
+# Loads the dataset and returns the spam, ham, test, and file lists
+def load_dataset(root_dir):
+    spamList = [] # List that contains spam files from parts 1-9
+    hamList  = [] # List that contains ham files from parts 1-9
+    testList = [] # List that contains files from part 10
+    fileList = [] # List that contains filenames from part 10
 
-def getFinalWordSpamProb(word): #returns the probability that a file that contains this word is spam
-    spamProb = getWordSpamProb(word)
-    hamProb = getWordHamProb(word)
-    if (hamProb == 0 and spamProb == 0):
-        return 0
-    finalSpamProb = (spamProb * priorSpamProb) / ((spamProb * priorSpamProb) + (hamProb * priorHamProb)) #Bayes theorem
-    return finalSpamProb
+    for directories, subdirs, files in os.walk(root_dir):
+            for file in files:
+                with open(os.path.join(directories, file), encoding='latin-1') as f:
+                    text = f.read()
+                    if 'part10' in directories:
+                        testList.append(text)
+                        fileList.append(file)
+                    elif re.search(r'spmsg', file):
+                        spamList.append(text)
+                    else:
+                        hamList.append(text)
+    return spamList, hamList, testList, fileList
 
-
-
-dirList = ["bare", "lemm", "lemm_stop", "stop"]
-for d in dirList:
-    rootdir = "lingspam_public\\{0}".format(d)
-    spamList = [] #list that contains spam files from parts 1-9
-    hamList = [] #list that contains ham files from parts 1-9
-    testList = [] #list that contains files from part 10
-    fileList = [] #list that contains filenames from part 10
-    spamFileLength = [] #list that contains the length of spam messages
-    hamFileLength = [] #list that contains the length of ham messages
-    spamSet = set() #set that contains words from spamList
-    hamSet = set() #set that contains words from hamList
-    fileSet = set() #set that contains words from current file so no duplicates are counted
-    predictedSpam = set() #set that contains files filtered as spam
-    predictedHam = set() #set that contains files predicted as ham
-    spamWordCount = {}
-    hamWordCount = {}
-    spamFilter = {}
-    failedPredictions = 0
-    correctSpamPredictions = 0
-    correctHamPredictions = 0
-    incorrectSpamPredictions = 0
-    totalPop = 0
-    accuracy = []
-    recall = []
-    precision = []
-    f1score = []
-    p = 1
-    pn = 1
-    stopWords = set()
+# Returns dictionary with word as key and count as value
+def tokenizeAndFilter(textList):
+    stopWords = set(stopwords.words('english'))
+    wordCount = defaultdict(int)
     
-    for directories, subdirs, files in os.walk(rootdir):
-        pass
+    for text in textList:
+        words = word_tokenize(text)
+        for word in words:
+            if word.isalpha() and word not in stopWords:
+                wordCount[word.lower()] += 1
+                
+    return wordCount
 
-    for subdirs in os.walk(rootdir):
-        if (len(subdirs[1]) == 0):
-                subdirName = (format(subdirs[0].split('\\')[-1]))
-                if (subdirName == "part10"):
-                    for file in files:
-                        with open(os.path.join(directories, file)) as f:
-                                testText = f.read()
-                                testList.append(testText)
-                                fileList.append(file)
-                else:
-                    for file in files:
-                        if (re.search("spmsg*", file)):
-                            with open(os.path.join(directories, file)) as f:
-                                spamText = f.read()
-                                spamList.append(spamText)
-                        else:
-                            with open(os.path.join(directories, file)) as f:
-                                hamText = f.read()
-                                hamList.append(hamText)
+# Trains the Naive Bayes classifier, returns the spam and 
+# ham word count dictionaries and the prior probabilities
+def trainNaiveBayes(spamList, hamList):
+    spamWordCount = tokenizeAndFilter(spamList)
+    hamWordCount  = tokenizeAndFilter(hamList)
+    
+    totalSpam = len(spamList)
+    totalHam  = len(hamList)
+    
+    priorSpamProb = totalSpam / (totalSpam + totalHam) 
+    priorHamProb  = totalHam  / (totalSpam + totalHam)
 
-    for spam in spamList:
-        spamWordList = word_tokenize(spam)
-        for word in spamWordList:
-            if (word not in stopWords) and (word not in fileSet): #If the word hasn't already appeared in this file
-                spamFileLength.append(len(spamWordList)) 
-                spamWordCount[word] = spamWordCount.get(word, 0) + 1 #Increase the number of times this word has been found in spam files
-                fileSet.add(word)
-        fileSet = set()
+    return spamWordCount, hamWordCount, priorSpamProb, priorHamProb
+
+# Returns the probability of a word given the email class
+def calculateWordProb(word, wordCount, totalEmails):
+    return (wordCount.get(word, 0) + 1) / (totalEmails + len(wordCount))
+
+# Classifies an email as spam or ham
+def classifyEmail(email, spamWordCount, hamWordCount, priorSpamProb, 
+                  priorHamProb, totalSpam, totalHam):
+    words = word_tokenize(email)
+    stopWords = set(stopwords.words('english'))
+    
+    pSpam = priorSpamProb
+    pHam = priorHamProb
+    
+    for word in words:
+        if word.isalpha() and word not in stopWords:
+            word = word.lower()
+            pSpam *= calculateWordProb(word, spamWordCount, totalSpam)
+            pHam *= calculateWordProb(word, hamWordCount, totalHam)
             
-    for ham in hamList:
-        hamWordList = word_tokenize(ham)
-        for word in hamWordList:
-            if (word not in stopWords) and (word not in fileSet): #If the word hasn't already appeared in this file
-                hamFileLength.append(len(hamWordList))
-                hamWordCount[word] = hamWordCount.get(word, 0) + 1 #Increase the number of times this word has been found in ham files
-                fileSet.add(word)
-        fileSet = set()
+    return pSpam > pHam
 
-    priorSpamProb = len(spamList)/(len(spamList)+len(hamList))
-    priorHamProb = len(hamList)/(len(spamList)+len(hamList))
-
-    l = 0
-    for trainFile in spamList:
-        trainWordList = word_tokenize(trainFile)
-        for word in trainWordList:
-            if (word not in stopWords) and (word not in spamFilter):
-                spamFilter[word] = getFinalWordSpamProb(word) #set the value of the key 'word' as the probability that a file containing this word is spam
-                l = l + spamFilter[word]
-        fileAvg = l/len(spamFilter)
-        l = 0
-    limit = fileAvg/len(spamList)
-
-    for trainFile in hamList:
-        trainWordList = word_tokenize(trainFile)
-        for word in trainWordList:
-            if (word not in stopWords) and (word not in spamFilter):
-                spamFilter[word] = getFinalWordSpamProb(word)
-
-    fileCount = 0
-    for test in testList:
-        testWordList = word_tokenize(test)
-        for word in testWordList:
-            if word not in stopWords:
-                p *= spamFilter[word]
-                pn *= (1-p)
-        fileProb = p/(p+pn) #Bayes theorem
-        if (fileProb > limit):
-            predictedSpam.add(test)
+# Evaluates the model on the test dataset
+def evaluateModel(testList, fileList, spamWordCount, hamWordCount, priorSpamProb, priorHamProb, totalSpam, totalHam):
+   
+    truePositive = falsePositive = trueNegative = falseNegative = 0
+    
+    for i, email in enumerate(testList):
+        isSpam = classifyEmail(email, spamWordCount, hamWordCount, priorSpamProb, priorHamProb, totalSpam, totalHam)
+        if isSpam and re.search(r'spmsg', fileList[i]):
+            truePositive += 1
+        elif isSpam:
+            falsePositive += 1
+        elif re.search(r'spmsg', fileList[i]):
+            falseNegative += 1
         else:
-            predictedHam.add(test)
-        if ((fileProb <= limit) and (re.search("spmsg*", fileList[fileCount]))):
-            failedPredictions += 1
-            totalPop += 1
-        if ((fileProb <= limit) and not (re.search("spmsg*", fileList[fileCount]))):
-            correctHamPredictions += 1
-            totalPop += 1
-        if ((fileProb > limit) and (re.search("spmsg*", fileList[fileCount]))):
-            correctSpamPredictions += 1
-            totalPop += 1
-        if ((fileProb > limit) and not (re.search("spmsg*", fileList[fileCount]))):
-            incorrectSpamPredictions += 1
-            totalPop += 1
-        if (correctSpamPredictions > 0 or incorrectSpamPredictions > 0):
-            precision.append(correctSpamPredictions/(incorrectSpamPredictions+correctSpamPredictions))
-        if (correctSpamPredictions > 0 or incorrectSpamPredictions > 0 or failedPredictions > 0):
-            recall.append(correctSpamPredictions/(incorrectSpamPredictions+correctSpamPredictions+failedPredictions))
-        accuracy.append((correctSpamPredictions+correctHamPredictions)/totalPop)
+            trueNegative += 1
+    
+    return truePositive, falsePositive, trueNegative, falseNegative
 
-        p = 1
-        pn = 1
-        fileCount += 1
-        
-    for i in range(len(recall)):
-        f1score.append(2*((precision[i]*recall[i])/(precision[i]+recall[i])))
+# Calculates the performance metrics
+def calculateMetrics(tp, fp, tn, fn):
+    accuracy = (tp + tn) / (tp + fp + tn + fn)
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1Score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    
+    return accuracy, precision, recall, f1Score
 
-    plt.figure(1)
+# Runs the Naive Bayes classifier
+def runNaiveBayes(root_dir):
+    spamList, hamList, testList, fileList = load_dataset(root_dir)
 
-    plt.plot(recall) #Recall curve
-    plt.xlabel('Recall')
+    spamWordCount, hamWordCount, priorSpamProb, priorHamProb = trainNaiveBayes(spamList, hamList)
 
-    plt.figure(2)
+    totalSpam = len(spamList)
+    totalHam = len(hamList)
+    
+    tp, fp, tn, fn = evaluateModel(testList, fileList, spamWordCount, hamWordCount, priorSpamProb, priorHamProb, totalSpam, totalHam)
+    
+    accuracy, precision, recall, f1Score = calculateMetrics(tp, fp, tn, fn)
+    
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1Score:.4f}")
+    
+    return accuracy, precision, recall, f1Score
 
-    plt.plot(precision) #Precision curve
-    plt.xlabel('Precision')
+# Plotting the results
+def plotMetrics(metrics):
+    """
+    Plot performance metrics.
 
-    plt.figure(3)
-
-    plt.plot(accuracy) #Accuracy curve
-    plt.xlabel('Accuracy')
-
-    plt.figure(4)
-
-    plt.plot(f1score) #F1 score curve
-    plt.xlabel('F1 Score')
-
-
+    Parameters:
+    metrics (tuple): Tuple containing accuracy, precision, recall, and F1 score.
+    """
+    labels = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+    
+    plt.figure(figsize=(10, 6))
+    plt.bar(labels, metrics, color=['blue', 'orange', 'green', 'red'])
+    plt.ylim(0, 1)
+    plt.xlabel('Metrics')
+    plt.ylabel('Scores')
+    plt.title('Spam Filter Performance Metrics')
     plt.show()
 
+
+if __name__ == '__main__':
+    root_dir = "lingspam_public"
+    metrics = runNaiveBayes(root_dir)
+    plotMetrics(metrics)
